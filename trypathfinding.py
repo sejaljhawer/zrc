@@ -2,7 +2,7 @@ import math
 from pathfinding.core.grid import Grid
 from pathfinding.finder.breadth_first import BreadthFirstFinder
 from time import sleep
-delay = .5
+delay = 0
 
 
 layout = [
@@ -62,6 +62,7 @@ def parseTaskData(data):
 		#print(int(task[1]))
 	return taskMatrix
 
+# See which of our bins has space to put stuff in 
 def findEmptyBin():
 	global bins
 	if bins[0] == False:
@@ -106,7 +107,7 @@ def putOnShelf():
 
 
 
-
+# ISSUE: When scanning, it’s adding a leading 0 to the front of UPCA barcodes, which is causing errors in bins. Added [1:]
 # image variable must come in correctly somehow
 # can scan both UPCA barcodes on the items, or QR codes on the task list
 # adds barcodes after reading to their appropriate record-keeping spots (tasks or itemPositions)
@@ -121,7 +122,8 @@ def decipherBarcode(image): #, symbology):
 
 	if barcodes:
 		for barcode in barcodes: 
-			barcodeData = barcode.data.decode("utf-8") 		#returns the ID in this case
+			barcodeData = barcode.data.decode("utf-8")[1:] 		#returns the ID in this case, ID is a string
+			#print(isinstance(barcodeData, str))
 			symbology = barcode.type 
 			print("[INFO] Found {} barcode: {}".format(symbology, barcodeData))
 
@@ -167,10 +169,9 @@ def mechanicalMoveForwardOne():
 	# move forward one serially
 
 
-# Mechanical/ serial aspect of rotation, also updates currRotation in record-keeping
+# Fill in with Mechanical/ serial aspect of rotation, also updates currRotation in record-keeping
+# same as your rotate(degrees, speed = None) except added last 2 lines
 def rotateRoombaDegrees(degrees): 
-	global currRotation
-	i = 0 # for compling purposes only
 	degrees %= 360	 	# negative numbers become positive ( - 90 becomes 270)
 	if (degrees < 1 and degrees > 0): 
 		degrees = 0
@@ -179,12 +180,9 @@ def rotateRoombaDegrees(degrees):
 		pass
 	elif (degrees == 180):
 		pass
-	elif (degrees == 270):
+	elif (degrees == 270): 		# serial to turn right 90
 		pass
-		# serial to turn right 90
-	else: #degrees == 0
-		pass
-		#do nothing
+	global currRotation
 	currRotation = (currRotation + degrees) % 360
 
 
@@ -201,30 +199,12 @@ def faceDegree(degreeToFace):
 	bx = math.cos(math.radians( degreeToFace ))
 	by = math.sin(math.radians( degreeToFace ))
 	desiredVector = (bx, by)
-	# calculateDegreesToRotate(desiredVector) OPPOSITE SAD
-	ax = math.cos(math.radians( currRotation ))
-	ay = math.sin(math.radians( currRotation ))
-	currOrientationVector = ( ax, ay )		#convert degrees to radians for math library. cos(theta), sin(theta)
-	(bx, by) = desiredVector
-	determinant = ax*by - bx*ay 	# -1, 0, or 1
-	if (determinant < 1 and determinant > 0): # fix rounding
-		determinant = 0
-	if determinant == 0:  		#determinant of two vectors of matrices, either orientation aligned with direction of travel or not
-		if desiredVector != currOrientationVector: # not aligned with direction of travel (facing 180 away from it)
-			rotateRoombaDegrees(180) 
-			#print("just rotated 180 degrees")
-	else:   								# roomba needs to turn 90 degrees in a particular direction
-		rotateRoombaDegrees(90*determinant) 	#determinant either -1 or 1
-		#print("just rotated %d * 90 degrees", determinant )
-
-
-
-
+	calculateDegreesToRotate(desiredVector, 1) # OPPOSITE SAD
 
 
 # Calculates degrees to rotate and then actually makes the roomba rotate by calling rotateRoombaDegrees
 # desiredVector is of degrees that we want to face (with moveOneSpot, because of direction we want to face)
-def calculateDegreesToRotate(desiredVector): ###Fix determinant sign
+def calculateDegreesToRotate(desiredVector, determinantSign): ###Fix determinant sign
 	ax = math.cos(math.radians( currRotation ))
 	ay = math.sin(math.radians( currRotation ))
 	currOrientationVector = ( ax, ay )		#convert degrees to radians for math library. cos(theta), sin(theta)
@@ -235,10 +215,9 @@ def calculateDegreesToRotate(desiredVector): ###Fix determinant sign
 	if determinant == 0:  		#determinant of two vectors of matrices, either orientation aligned with direction of travel or not
 		if desiredVector != currOrientationVector: # not aligned with direction of travel (facing 180 away from it)
 			rotateRoombaDegrees(180) 
-			#print("just rotated 180 degrees")
 	else:   								# roomba needs to turn 90 degrees in a particular direction
-		rotateRoombaDegrees(-90*determinant) 	#determinant either -1 or 1
-		#print("just rotated %d * -90 degrees", determinant )
+		rotateRoombaDegrees(determinantSign*90*determinant) 	#sign is -1 with moveOneSpot, 1 for faceDegree
+	
 
 
 
@@ -253,7 +232,7 @@ def moveOneSpot(x, y): 	#destination coordinates
 		bx = x - currX  		#delta position is (bx, by)
 		by = y - currY		#tuple / vector of how much to go in each direciton, either -1, 0, or 1
 		deltaPosVector = (bx, by)
-		calculateDegreesToRotate(deltaPosVector)
+		calculateDegreesToRotate(deltaPosVector, -1)
  		# MOVEMENT STUFF
 		currX = x 			# update where we are in record-keeping
 		currY = y
@@ -262,7 +241,7 @@ def moveOneSpot(x, y): 	#destination coordinates
 
 
 
-
+# feed it a destination coordinate
 def goToPosition(endX, endY):
 	global currX, currY
 	path = findPath(currX, currY, endX, endY)
@@ -275,6 +254,10 @@ def printPos():
 	print(grid.grid_str(start = grid.node(currX, currY)))
 	print("Facing: ")
 	print(currRotation)
+	print(currX, currY)
+
+
+
 
 #from pathfinding.core.diagonal_movement import DiagonalMovement
 def findPath(sx, sy, ex, ey):
@@ -298,7 +281,7 @@ def findPath(sx, sy, ex, ey):
 def goUpToShelfAndBack():
 	faceShelf()
 	# Serial move until bumpers are hit. DO NOT CALL MOVEONESPOT, it will update the global variables of position incorrectly
-	image = 'upca.gif' # take Picture of barcodes and store image somewhere
+	image = 'upca998877665128.gif' # take Picture of barcodes and store image somewhere
 	decipherBarcode(image)
 	rotateRoombaDegrees(180) #turn around
 	# serial move, go back until we are back on the intersection
@@ -306,11 +289,8 @@ def goUpToShelfAndBack():
 
 
 
-
-
 # go to the end of the destination shelf that is closest to us
 # 3 variables: where we are (shelf and position), shelf we want to go to
-# returns the 
 def goToClosestEndOfDesiredShelf(desiredShelf):
 	shelfY = 0;
 	if desiredShelf == 0:
@@ -322,31 +302,37 @@ def goToClosestEndOfDesiredShelf(desiredShelf):
 
 	shelfX = 0
 
+	print(shelfY, getCurrShelf(), getCurrShelfPos(), desiredShelf)
+
 	if currX == 7 and currY == 4: # reading task list at the beginning
 		shelfX = 7 	# go to stock room third spot
-	elif (getCurrShelfPos() == 0) and (desiredShelf == 1 or 2) and (getCurrShelf() == 0):
-		print("going to shelf1")
+	elif (getCurrShelfPos() == 0) and (desiredShelf == (1 or 2)) and (getCurrShelf() == 0):
+		print("going to shelf1. or even shelf2 from stockroom")
 		shelfX = 2	
-	elif (getCurrShelfPos() == 0) and (desiredShelf == 1 or 2) and (getCurrShelf() == 1 or 2): #at normal shelves 
+	elif (getCurrShelfPos() == 0) and (desiredShelf == (1 or 2)) and (getCurrShelf() == (1 or 2)): #at normal shelves 
+		print("going between shelves 1, 2[0]")
 		shelfX = 0
-	elif (getCurrShelfPos() == 2) and (desiredShelf == 1 or 2) and (getCurrShelf() == 1 or 2): # at normal shelves
+	elif (getCurrShelfPos() == 2) and (desiredShelf == (1 or 2)) and (getCurrShelf() == (1 or 2)): # at normal shelves
+		print("going between shelves 1, 2[2]")
 		shelfX = 2
-	elif (desiredShelf == 1 or 2) and (getCurrShelf() == 0): # at stockroom
-		shelfX = 2
-	elif (getCurrShelf() == 1 or 2) and (desiredShelf == 0): #trying to go stockroom, always go to one spot
+	# elif (desiredShelf == 1 or 2) and (getCurrShelf() == 0): # at stockroom
+	# 	shelfX = 2
+	elif ((getCurrShelf() == (1 or 2)) and (desiredShelf == 0)): #trying to go stockroom, always go to one spot
+		print("going back to stockroom") 				# ISSUE: it's not going back to stock room/ entering this
+		# while True:
+		# 	try:exec(input("DEBUG: "))
+		# 	except KeyboardInterrupt:break
+		# 	except Exception as E:print("ERROR:"+str(E))
 		shelfX = 5
-	else:
-		pass
+	elif (getCurrShelf() ==  2 and (desiredShelf == 0) and getCurrShelfPos()==2):
+		print("shelf 2, pos 2, going to stockroom")
+		shelfX = 5
 
 	goToPosition(shelfX , shelfY)
 
 
 def getShelfDirectionOfTravel():
 	return getCurrShelfPos() * 90 # shelf spot 0 is 0 degrees, shelf spot 2 is 180
-	# if getCurrShelfPos == 2: # in the third spot 00X
-	# 	return 180
-	# else: # elif getCurrShelfPos == 0 # in the first spot X00
-	# 	return 0  
 
 # unlike the other moveOneSpot, this one doesn't take desitnation coordinates. instead just serially moves forward in whichever
 # direction it is already facing, and updates record keeping of curr information
@@ -365,6 +351,11 @@ def moveOneForward():
 	printPos()
 	mechanicalMoveForwardOne()
 
+def allBinsEmpty():
+	return ((bins[0] == False) and (bins[1] == False) and (bins[2] == False))
+
+
+
 
 # reads all 3 barcodes/positions along a shelf 
 # maintains direction of travel, except after the last barcode / image 
@@ -373,30 +364,61 @@ def traverseShelf():
 	global currX, currY
 	shelfDirectionOfTravel = getShelfDirectionOfTravel()	
 	goUpToShelfAndBack()
-	print("just went to 1st shelf spot and back, facing south")
-	# while True:
-	# 	try:exec(input("DEBUG: "))
-	# 	except Exception as E:print("ERROR:"+str(E))
-	# 	except BaseException: break #control c to keep going the program
+	#print("just went to 1st shelf spot and back, facing south")
 	faceDegree(shelfDirectionOfTravel)
-	print("now facing degree of travel")
+	#print("now facing degree of travel")
+	moveOneForward()
+	goUpToShelfAndBack()
+	#print("just went to 2nd shelf spot and back, facing south")
+	#print(currX, currY,  currRotation, getCurrShelf(), getCurrShelfPos())
+	faceDegree(shelfDirectionOfTravel)
+	#print("face Direction of Travel")
+	#print(currX, currY,  currRotation, getCurrShelf(), getCurrShelfPos())
+	moveOneForward()
+	goUpToShelfAndBack()
+	#print("just went to 3rd shelf spot and back, facing south")
+	#print(currX, currY,  currRotation, getCurrShelf(), getCurrShelfPos())
+
+#get the shelf and position indices in tasks list
+def getShelfandPosition(itemID):
+	l = sum(tasks, [])
+	index = l.index(itemID)
+	shelf = index // len(l)
+	shelfPosition = index % 3
+	return shelf, shelfPosition
+
+
+# get indices of itemID, go to that shelf
+def findNextShelf():
+	shelves = [0 for i in range(3)]
+	for itemID in bins: 
+		if itemID:  # not false
+			shelf, shelfPosition = getShelfandPosition(itemID)
+
+
+			# l = sum(tasks, [])
+			# index = l.index(itemID)
+			# shelf = index // len(l)
+			# shelfPosition = index % 3
+			shelves[shelf] += 1
 
 	# while True:
 	# 	try:exec(input("DEBUG: "))
 	# 	except Exception as E:print("ERROR:"+str(E))
-	# 	except BaseException: break #control c to keep going the program
+	# 	except KeyboardInterrupt:break		
 
-	moveOneForward()
-	goUpToShelfAndBack()
-	print("just went to 2nd shelf spot and back, facing south")
-	print(currX, currY,  currRotation, getCurrShelf(), getCurrShelfPos())
-	faceDegree(shelfDirectionOfTravel)
-	print("face Direction of Travel")
-	print(currX, currY,  currRotation, getCurrShelf(), getCurrShelfPos())
-	moveOneForward()
-	goUpToShelfAndBack()
-	print("just went to 3rd shelf spot and back, facing south")
-	print(currX, currY,  currRotation, getCurrShelf(), getCurrShelfPos())
+	if shelves[2]: 					
+		goToClosestEndOfDesiredShelf(2)
+		faceDegree(180)
+	elif shelves[1]:
+		goToClosestEndOfDesiredShelf(1)
+	elif shelves[0]:
+		print("should go straight to stockroom")
+		print(currX, currY)
+		goToClosestEndOfDesiredShelf(0)
+
+
+
 
 def start():
 	# global shelfDirectionOfTravel
@@ -412,15 +434,20 @@ def start():
 	print("before going to Shelf2")
 	goToClosestEndOfDesiredShelf(2) 
 	traverseShelf()
-	# print(bins)
-	while True:
-		try:exec(input("DEBUG: "))
-		except Exception as E:print("ERROR:"+str(E))
-
+	print(bins)
+	print(tasks)
 	# Second half allowing for optimizations
-	# check Bins
-	# if anything in currentShelf, go there & goUpToShelfAndBack()
+	if not allBinsEmpty():
+		findNextShelf()  	# determine and go to next logical shelf
 
+
+		# put everything in that shelf in correct spot
+	# To finish, go to closest part of break room
+
+	# while True:
+	# 	try:exec(input("DEBUG: "))
+	# 	except KeyboardInterrupt:break
+	# 	except Exception as E:print("ERROR:"+str(E))
 
 
 # From top to bottom: 
@@ -432,20 +459,8 @@ bins = [False for i in range(3)] #contains ID of item in Bin 0, 1, 2
 tasks = 0 #this will be the global task list
 shelfDirectionOfTravel = 0
 
+
 currX = 7
 currY = 7
 currRotation = 0	 # 0 = facing east, 90 = facing north, 180 = facing west, 270 = facing south (-90) <-- BUT would be better to turn left 90
 start()
-
-
-
-# ex = 2
-# ey = 6
-# goToPosition(ex, ey)
-#findPath(sx, sy, ex, ey)
-
-
-
-
-
-
